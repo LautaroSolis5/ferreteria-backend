@@ -1,0 +1,27 @@
+## Build outputs
+bin/
+obj/
+
+## Logs
+logs/
+*.log
+
+## Base de datos local SQLite (por si queda algún archivo)
+*.db
+*.db-shm
+*.db-wal
+
+## Archivos de configuración con datos sensibles (contraseñas)
+**/appsettings.Development.json
+
+## Visual Studio
+.vs/
+*.user
+*.suo
+
+## Rider
+.idea/
+
+## OS
+.DS_Store
+Thumbs.db
