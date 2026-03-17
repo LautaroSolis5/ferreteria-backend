@@ -1,28 +1,32 @@
 using BLL.Interfaces;
 using L;
-using MailKit.Net.Smtp;
-using MailKit.Security;
 using Microsoft.Extensions.Configuration;
-using MimeKit;
 using System;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace FerreteriaDB.Services
 {
     /// <summary>
-    /// Implementación de IEmailServicio usando MailKit + SMTP.
-    /// Compatible con Gmail, Brevo, SendGrid u cualquier proveedor SMTP.
-    /// La configuración se lee desde appsettings.json / variables de entorno (Render).
+    /// Implementación de IEmailServicio usando la API REST de Brevo (puerto 443).
+    /// Evita el bloqueo de puertos SMTP en entornos cloud como Render free tier.
     /// </summary>
     public class EmailServicio : IEmailServicio
     {
         private readonly IConfiguration _config;
         private readonly AppLogger      _logger;
+        private readonly HttpClient     _http;
 
-        public EmailServicio(IConfiguration config, AppLogger logger)
+        private const string BrevoApiUrl = "https://api.brevo.com/v3/smtp/email";
+
+        public EmailServicio(IConfiguration config, AppLogger logger, IHttpClientFactory httpFactory)
         {
             _config = config;
             _logger = logger;
+            _http   = httpFactory.CreateClient("brevo");
         }
 
         public async Task EnviarVerificacionAsync(
@@ -34,33 +38,43 @@ namespace FerreteriaDB.Services
             var asunto   = "Verificá tu email – Ferretería Adrogué";
             var htmlBody = BuildVerificationEmail(nombre, verificationUrl);
 
-            await EnviarAsync(destinatarioEmail, asunto, htmlBody);
+            await EnviarAsync(destinatarioEmail, nombre, asunto, htmlBody);
         }
 
-        // ─── Envío vía SMTP ───────────────────────────────────────────────────────
+        // ─── Envío vía API REST Brevo ─────────────────────────────────────────────
 
-        private async Task EnviarAsync(string destinatario, string asunto, string htmlBody)
+        private async Task EnviarAsync(
+            string destinatarioEmail, string destinatarioNombre,
+            string asunto, string htmlBody)
         {
-            var host      = _config["Email:SmtpHost"]     ?? throw new InvalidOperationException("Email:SmtpHost no configurado.");
-            var port      = int.Parse(_config["Email:SmtpPort"] ?? "587");
-            var username  = _config["Email:SmtpUsername"] ?? throw new InvalidOperationException("Email:SmtpUsername no configurado.");
-            var password  = _config["Email:SmtpPassword"] ?? throw new InvalidOperationException("Email:SmtpPassword no configurado.");
-            var fromEmail = _config["Email:FromEmail"]    ?? username;
+            var apiKey    = _config["Email:BrevoApiKey"]  ?? throw new InvalidOperationException("Email:BrevoApiKey no configurado.");
+            var fromEmail = _config["Email:FromEmail"]    ?? throw new InvalidOperationException("Email:FromEmail no configurado.");
             var fromName  = _config["Email:FromName"]     ?? "Ferretería Adrogué";
 
-            var message = new MimeMessage();
-            message.From.Add(new MailboxAddress(fromName, fromEmail));
-            message.To.Add(MailboxAddress.Parse(destinatario));
-            message.Subject = asunto;
-            message.Body    = new BodyBuilder { HtmlBody = htmlBody }.ToMessageBody();
+            var payload = new
+            {
+                sender      = new { name = fromName,           email = fromEmail },
+                to          = new[] { new { email = destinatarioEmail, name = destinatarioNombre } },
+                subject     = asunto,
+                htmlContent = htmlBody
+            };
 
-            using var client = new SmtpClient();
-            await client.ConnectAsync(host, port, SecureSocketOptions.StartTls);
-            await client.AuthenticateAsync(username, password);
-            await client.SendAsync(message);
-            await client.DisconnectAsync(true);
+            var json    = JsonSerializer.Serialize(payload);
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            _logger.LogInfo($"Email enviado a {destinatario} — {asunto}");
+            using var request = new HttpRequestMessage(HttpMethod.Post, BrevoApiUrl);
+            request.Headers.Add("api-key", apiKey);
+            request.Content = content;
+
+            var response = await _http.SendAsync(request);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                throw new InvalidOperationException($"Brevo API error {(int)response.StatusCode}: {body}");
+            }
+
+            _logger.LogInfo($"Email enviado vía Brevo API a {destinatarioEmail} — {asunto}");
         }
 
         // ─── Template HTML ────────────────────────────────────────────────────────

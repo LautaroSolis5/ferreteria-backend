@@ -32,6 +32,7 @@ builder.Services.AddScoped<UsuarioRepositorio>();
 
 // ─── DI: Servicios ───────────────────────────────────────────────────────────
 
+builder.Services.AddHttpClient("brevo");
 builder.Services.AddScoped<IProductoServicio,  ProductoServicio>();
 builder.Services.AddScoped<ICategoriaServicio, CategoriaServicio>();
 builder.Services.AddScoped<IEmailServicio,     EmailServicio>();
