@@ -137,14 +137,6 @@ namespace FerreteriaDB.Services
                 </tr>
               </table>
 
-              <!-- Enlace alternativo -->
-              <p style=""margin:0 0 8px;color:#888;font-size:13px"">
-                Si el botón no funciona, copiá y pegá este enlace en tu navegador:
-              </p>
-              <p style=""margin:0 0 28px;word-break:break-all"">
-                <a href=""{verificationUrl}"" style=""color:#FF6B00;font-size:12px"">{verificationUrl}</a>
-              </p>
-
               <!-- Aviso de expiración -->
               <div style=""background:#fff8f0;border-left:4px solid #FF6B00;padding:12px 16px;border-radius:0 6px 6px 0"">
                 <p style=""margin:0;color:#666;font-size:13px"">
