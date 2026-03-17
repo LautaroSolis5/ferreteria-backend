@@ -3,39 +3,99 @@ using BLL.Servicios;
 using DAL;
 using DAL.Repositorios;
 using FerreteriaDB.Data;
+using FerreteriaDB.Helpers;
 using L;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // ─── Configuración ────────────────────────────────────────────────────────────
 
 var connectionString = builder.Configuration.GetConnectionString("PostgreSQL")
-    ?? throw new InvalidOperationException("No se encontró la connection string 'PostgreSQL'. Configurala en appsettings o como variable de entorno.");
-var rutaLog          = builder.Configuration["Logger:RutaArchivo"] ?? "logs/ferreteria.log";
-var origenes         = builder.Configuration.GetSection("AllowedOrigins").Get<string[]>() ?? new string[0];
+    ?? throw new InvalidOperationException("No se encontró la connection string 'PostgreSQL'.");
+var rutaLog  = builder.Configuration["Logger:RutaArchivo"] ?? "logs/ferreteria.log";
+var origenes = builder.Configuration.GetSection("AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
 
-// ─── DI: registro de servicios ────────────────────────────────────────────────
+// ─── DI: Logger y DB ─────────────────────────────────────────────────────────
 
-// L - Logger singleton (comparte el lock de escritura en archivo)
 builder.Services.AddSingleton<AppLogger>(_ => new AppLogger(rutaLog));
-
-// DAL - Conexión singleton (solo guarda el connection string)
 builder.Services.AddSingleton<Conexion>(_ => new Conexion(connectionString));
 
-// DAL - Repositorios scoped (una instancia por request HTTP)
+// ─── DI: Repositorios ────────────────────────────────────────────────────────
+
 builder.Services.AddScoped<ProductoRepositorio>();
 builder.Services.AddScoped<CategoriaRepositorio>();
+builder.Services.AddScoped<UsuarioRepositorio>();
 
-// BLL - Servicios scoped, registrados contra sus interfaces
-builder.Services.AddScoped<IProductoServicio, ProductoServicio>();
+// ─── DI: Servicios ───────────────────────────────────────────────────────────
+
+builder.Services.AddScoped<IProductoServicio,  ProductoServicio>();
 builder.Services.AddScoped<ICategoriaServicio, CategoriaServicio>();
+builder.Services.AddScoped<IAuthServicio,      AuthServicio>();
 
-// ASP.NET Core
+// ─── JWT Helper ──────────────────────────────────────────────────────────────
+
+builder.Services.AddSingleton<JwtHelper>();
+
+// ─── JWT Authentication ──────────────────────────────────────────────────────
+
+var jwtKey = builder.Configuration["Jwt:SecretKey"]
+    ?? throw new InvalidOperationException("Jwt:SecretKey no configurado.");
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer           = true,
+            ValidateAudience         = true,
+            ValidateLifetime         = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer              = builder.Configuration["Jwt:Issuer"],
+            ValidAudience            = builder.Configuration["Jwt:Audience"],
+            IssuerSigningKey         = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+            ClockSkew                = TimeSpan.Zero, // sin tolerancia de expiración
+        };
+    });
+
+builder.Services.AddAuthorization();
+
+// ─── ASP.NET Core ────────────────────────────────────────────────────────────
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(c =>
+{
+    // Habilita el botón "Authorize" en Swagger para enviar Bearer token
+    c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+    {
+        Name         = "Authorization",
+        Type         = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
+        Scheme       = "bearer",
+        BearerFormat = "JWT",
+        In           = Microsoft.OpenApi.Models.ParameterLocation.Header,
+        Description  = "Ingresá el token JWT (sin el prefijo Bearer)"
+    });
+    c.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
+    {
+        {
+            new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+            {
+                Reference = new Microsoft.OpenApi.Models.OpenApiReference
+                {
+                    Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
+                    Id   = "Bearer"
+                }
+            },
+            Array.Empty<string>()
+        }
+    });
+});
 
-// CORS para el frontend React
+// ─── CORS ────────────────────────────────────────────────────────────────────
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("FrontendPolicy", policy =>
@@ -50,7 +110,7 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// Inicializar PostgreSQL al arrancar (crea tablas e inserta datos iniciales si están vacías)
+// Inicializar BD al arrancar
 using (var scope = app.Services.CreateScope())
 {
     var conexion = scope.ServiceProvider.GetRequiredService<Conexion>();
@@ -58,18 +118,17 @@ using (var scope = app.Services.CreateScope())
     DbInitializer.Inicializar(conexion, logger);
 }
 
-// Swagger disponible siempre (útil para verificar el deploy en Render)
 app.UseSwagger();
 app.UseSwaggerUI();
 
-// HTTPS redirection solo en desarrollo local
-// En producción Render termina SSL en su proxy inverso
 if (app.Environment.IsDevelopment())
-{
     app.UseHttpsRedirection();
-}
 
 app.UseCors("FrontendPolicy");
-app.MapControllers();
 
+// IMPORTANTE: Authentication ANTES que Authorization
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapControllers();
 app.Run();

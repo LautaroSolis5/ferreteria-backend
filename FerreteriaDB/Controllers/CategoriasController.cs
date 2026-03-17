@@ -1,5 +1,6 @@
 using BE.Entidades;
 using BLL.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Threading.Tasks;
 
@@ -34,8 +35,9 @@ namespace FerreteriaDB.Controllers
             return Ok(categoria);
         }
 
-        // POST api/categorias
+        // POST api/categorias  →  solo Admin
         [HttpPost]
+        [Authorize(Roles = "Admin")]
         public async Task<IActionResult> Agregar([FromBody] Categoria categoria)
         {
             var resultado = await _servicio.AgregarAsync(categoria);
@@ -44,8 +46,9 @@ namespace FerreteriaDB.Controllers
             return CreatedAtAction(nameof(GetPorId), new { id = resultado.Id }, resultado);
         }
 
-        // PUT api/categorias/5
+        // PUT api/categorias/5  →  solo Admin
         [HttpPut("{id:int}")]
+        [Authorize(Roles = "Admin")]
         public async Task<IActionResult> Actualizar(int id, [FromBody] Categoria categoria)
         {
             if (id != categoria.Id)
@@ -56,8 +59,9 @@ namespace FerreteriaDB.Controllers
             return Ok(resultado);
         }
 
-        // DELETE api/categorias/5
+        // DELETE api/categorias/5  →  solo Admin
         [HttpDelete("{id:int}")]
+        [Authorize(Roles = "Admin")]
         public async Task<IActionResult> Eliminar(int id)
         {
             var resultado = await _servicio.EliminarAsync(id);

@@ -24,33 +24,94 @@ namespace FerreteriaDB.Data
             }
         }
 
+        // ─── Creación de tablas ───────────────────────────────────────────────────
+
         private static void CrearTablas(NpgsqlConnection conn)
         {
             var cmd = conn.CreateCommand();
             cmd.CommandText = @"
+                -- Tablas de catálogo
                 CREATE TABLE IF NOT EXISTS Categorias (
-                    Id          SERIAL          PRIMARY KEY,
-                    Nombre      TEXT            NOT NULL,
+                    Id          SERIAL        PRIMARY KEY,
+                    Nombre      TEXT          NOT NULL,
                     Descripcion TEXT,
-                    Activo      BOOLEAN         NOT NULL DEFAULT TRUE
+                    Activo      BOOLEAN       NOT NULL DEFAULT TRUE
                 );
 
                 CREATE TABLE IF NOT EXISTS Productos (
-                    Id            SERIAL          PRIMARY KEY,
-                    Nombre        TEXT            NOT NULL,
+                    Id            SERIAL        PRIMARY KEY,
+                    Nombre        TEXT          NOT NULL,
                     Descripcion   TEXT,
-                    Precio        DECIMAL(18,2)   NOT NULL,
-                    Stock         INTEGER         NOT NULL DEFAULT 0,
-                    CategoriaId   INTEGER         NOT NULL,
+                    Precio        DECIMAL(18,2) NOT NULL,
+                    Stock         INTEGER       NOT NULL DEFAULT 0,
+                    CategoriaId   INTEGER       NOT NULL,
                     ImagenUrl     TEXT,
-                    Activo        BOOLEAN         NOT NULL DEFAULT TRUE,
-                    FechaCreacion TIMESTAMP       NOT NULL,
+                    Activo        BOOLEAN       NOT NULL DEFAULT TRUE,
+                    FechaCreacion TIMESTAMP     NOT NULL,
                     FOREIGN KEY (CategoriaId) REFERENCES Categorias(Id)
+                );
+
+                -- Tablas de autenticación
+                CREATE TABLE IF NOT EXISTS Roles (
+                    IdRol     SERIAL PRIMARY KEY,
+                    NombreRol TEXT   NOT NULL UNIQUE
+                );
+
+                CREATE TABLE IF NOT EXISTS Usuarios (
+                    IdUsuario      SERIAL    PRIMARY KEY,
+                    Nombre         TEXT      NOT NULL,
+                    Apellido       TEXT      NOT NULL DEFAULT '',
+                    Email          TEXT      NOT NULL UNIQUE,
+                    PasswordHash   TEXT,
+                    RolId          INTEGER   NOT NULL REFERENCES Roles(IdRol),
+                    Activo         BOOLEAN   NOT NULL DEFAULT TRUE,
+                    AuthProvider   TEXT      NOT NULL DEFAULT 'local',
+                    ProviderUserId TEXT,
+                    FechaCreacion  TIMESTAMP NOT NULL DEFAULT NOW(),
+                    UltimoLogin    TIMESTAMP
                 );";
             cmd.ExecuteNonQuery();
         }
 
+        // ─── Datos iniciales ──────────────────────────────────────────────────────
+
         private static void InsertarDatosIniciales(NpgsqlConnection conn)
+        {
+            SeedRoles(conn);
+            SeedAdminUsuario(conn);
+            SeedCatalogo(conn);
+        }
+
+        private static void SeedRoles(NpgsqlConnection conn)
+        {
+            var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+                INSERT INTO Roles (IdRol, NombreRol) VALUES (1, 'Admin'), (2, 'Usuario')
+                ON CONFLICT (IdRol) DO NOTHING;";
+            cmd.ExecuteNonQuery();
+        }
+
+        private static void SeedAdminUsuario(NpgsqlConnection conn)
+        {
+            // Verificar si ya existe el admin
+            var checkCmd = conn.CreateCommand();
+            checkCmd.CommandText = "SELECT COUNT(*) FROM Usuarios WHERE Email = 'admin@ferreteria.com'";
+            var existe = Convert.ToInt32(checkCmd.ExecuteScalar()) > 0;
+            if (existe) return;
+
+            // Hash BCrypt de "Admin1234!" — se computa en tiempo de ejecución
+            string adminHash = BCrypt.Net.BCrypt.HashPassword("Admin1234!", workFactor: 12);
+
+            var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+                INSERT INTO Usuarios (Nombre, Apellido, Email, PasswordHash, RolId, Activo, AuthProvider, FechaCreacion)
+                VALUES ('Admin', 'Ferreteria', 'admin@ferreteria.com', @hash, 1, TRUE, 'local', NOW())
+                ON CONFLICT (Email) DO NOTHING;";
+            cmd.Parameters.AddWithValue("@hash", adminHash);
+            cmd.ExecuteNonQuery();
+        }
+
+        private static void SeedCatalogo(NpgsqlConnection conn)
         {
             var checkCmd = conn.CreateCommand();
             checkCmd.CommandText = "SELECT COUNT(*) FROM Categorias";
