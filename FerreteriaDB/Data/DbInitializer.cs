@@ -14,6 +14,7 @@ namespace FerreteriaDB.Data
                 using var conn = conexion.ObtenerConexion();
                 conn.Open();
                 CrearTablas(conn);
+                ActualizarEsquema(conn);   // ALTER TABLE para instalaciones existentes
                 InsertarDatosIniciales(conn);
                 logger.LogInfo("DbInitializer: Base de datos inicializada correctamente.");
             }
@@ -24,7 +25,7 @@ namespace FerreteriaDB.Data
             }
         }
 
-        // ─── Creación de tablas ───────────────────────────────────────────────────
+        // ─── Creación de tablas (instalaciones nuevas) ────────────────────────────
 
         private static void CrearTablas(NpgsqlConnection conn)
         {
@@ -58,18 +59,34 @@ namespace FerreteriaDB.Data
                 );
 
                 CREATE TABLE IF NOT EXISTS Usuarios (
-                    IdUsuario      SERIAL    PRIMARY KEY,
-                    Nombre         TEXT      NOT NULL,
-                    Apellido       TEXT      NOT NULL DEFAULT '',
-                    Email          TEXT      NOT NULL UNIQUE,
-                    PasswordHash   TEXT,
-                    RolId          INTEGER   NOT NULL REFERENCES Roles(IdRol),
-                    Activo         BOOLEAN   NOT NULL DEFAULT TRUE,
-                    AuthProvider   TEXT      NOT NULL DEFAULT 'local',
-                    ProviderUserId TEXT,
-                    FechaCreacion  TIMESTAMP NOT NULL DEFAULT NOW(),
-                    UltimoLogin    TIMESTAMP
+                    IdUsuario         SERIAL    PRIMARY KEY,
+                    Nombre            TEXT      NOT NULL,
+                    Apellido          TEXT      NOT NULL DEFAULT '',
+                    Email             TEXT      NOT NULL UNIQUE,
+                    PasswordHash      TEXT,
+                    RolId             INTEGER   NOT NULL REFERENCES Roles(IdRol),
+                    Activo            BOOLEAN   NOT NULL DEFAULT TRUE,
+                    AuthProvider      TEXT      NOT NULL DEFAULT 'local',
+                    ProviderUserId    TEXT,
+                    FechaCreacion     TIMESTAMP NOT NULL DEFAULT NOW(),
+                    UltimoLogin       TIMESTAMP,
+                    EmailVerificado   BOOLEAN   NOT NULL DEFAULT FALSE,
+                    TokenVerificacion TEXT,
+                    TokenExpiracion   TIMESTAMP
                 );";
+            cmd.ExecuteNonQuery();
+        }
+
+        // ─── Migraciones para instalaciones existentes ───────────────────────────
+        // Agrega columnas nuevas de forma segura si ya existe la tabla.
+
+        private static void ActualizarEsquema(NpgsqlConnection conn)
+        {
+            var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+                ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS EmailVerificado   BOOLEAN   NOT NULL DEFAULT FALSE;
+                ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS TokenVerificacion TEXT;
+                ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS TokenExpiracion   TIMESTAMP;";
             cmd.ExecuteNonQuery();
         }
 
@@ -93,19 +110,21 @@ namespace FerreteriaDB.Data
 
         private static void SeedAdminUsuario(NpgsqlConnection conn)
         {
-            // Verificar si ya existe el admin
             var checkCmd = conn.CreateCommand();
             checkCmd.CommandText = "SELECT COUNT(*) FROM Usuarios WHERE Email = 'admin@ferreteria.com'";
             var existe = Convert.ToInt32(checkCmd.ExecuteScalar()) > 0;
             if (existe) return;
 
-            // Hash BCrypt de "Admin1234!" — se computa en tiempo de ejecución
             string adminHash = BCrypt.Net.BCrypt.HashPassword("Admin1234!", workFactor: 12);
 
             var cmd = conn.CreateCommand();
             cmd.CommandText = @"
-                INSERT INTO Usuarios (Nombre, Apellido, Email, PasswordHash, RolId, Activo, AuthProvider, FechaCreacion)
-                VALUES ('Admin', 'Ferreteria', 'admin@ferreteria.com', @hash, 1, TRUE, 'local', NOW())
+                INSERT INTO Usuarios
+                    (Nombre, Apellido, Email, PasswordHash, RolId, Activo,
+                     AuthProvider, FechaCreacion, EmailVerificado)
+                VALUES
+                    ('Admin', 'Ferreteria', 'admin@ferreteria.com', @hash, 1, TRUE,
+                     'local', NOW(), TRUE)
                 ON CONFLICT (Email) DO NOTHING;";
             cmd.Parameters.AddWithValue("@hash", adminHash);
             cmd.ExecuteNonQuery();

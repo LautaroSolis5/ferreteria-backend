@@ -3,6 +3,8 @@ using BLL.Interfaces;
 using DAL.Repositorios;
 using L;
 using System;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading.Tasks;
 
 namespace BLL.Servicios
@@ -11,12 +13,32 @@ namespace BLL.Servicios
     {
         private readonly UsuarioRepositorio _usuarioRepo;
         private readonly AppLogger          _logger;
+        private readonly IEmailServicio     _emailServicio;
 
-        public AuthServicio(UsuarioRepositorio usuarioRepo, AppLogger logger)
+        public AuthServicio(
+            UsuarioRepositorio usuarioRepo,
+            AppLogger          logger,
+            IEmailServicio     emailServicio)
         {
-            _usuarioRepo = usuarioRepo;
-            _logger      = logger;
+            _usuarioRepo   = usuarioRepo;
+            _logger        = logger;
+            _emailServicio = emailServicio;
         }
+
+        // ─── Helpers de token ────────────────────────────────────────────────────
+
+        /// <summary>Genera 32 bytes aleatorios como string hexadecimal (64 chars).</summary>
+        private static string GenerarTokenRaw()
+            => Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLower();
+
+        /// <summary>
+        /// Hashea el token raw con SHA256.
+        /// Solo el hash se guarda en DB; el raw va en el enlace del email.
+        /// </summary>
+        private static string HashToken(string rawToken)
+            => Convert.ToHexString(
+                   SHA256.HashData(Encoding.UTF8.GetBytes(rawToken))
+               ).ToLower();
 
         // ─── Registro manual ─────────────────────────────────────────────────────
 
@@ -33,21 +55,25 @@ namespace BLL.Servicios
             if (existente != null)
                 return AuthResultado.Error("El email ya está registrado.");
 
-            // BCrypt maneja el salt automáticamente; workFactor=12 es seguro y razonable
-            string hash = BCrypt.Net.BCrypt.HashPassword(password, workFactor: 12);
+            string hash     = BCrypt.Net.BCrypt.HashPassword(password, workFactor: 12);
+            string tokenRaw = GenerarTokenRaw();
+            string tokenHash = HashToken(tokenRaw);
 
             var usuario = new Usuario
             {
-                Nombre         = nombre.Trim(),
-                Apellido       = apellido.Trim(),
-                Email          = email.ToLower().Trim(),
-                PasswordHash   = hash,
-                RolId          = 2,       // Rol "Usuario" (no Admin)
-                RolNombre      = "Usuario",
-                Activo         = true,
-                AuthProvider   = "local",
-                FechaCreacion  = DateTime.UtcNow,
-                UltimoLogin    = DateTime.UtcNow,
+                Nombre            = nombre.Trim(),
+                Apellido          = apellido.Trim(),
+                Email             = email.ToLower().Trim(),
+                PasswordHash      = hash,
+                RolId             = 2,
+                RolNombre         = "Usuario",
+                Activo            = true,
+                AuthProvider      = "local",
+                FechaCreacion     = DateTime.UtcNow,
+                UltimoLogin       = null,
+                EmailVerificado   = false,
+                TokenVerificacion = tokenHash,
+                TokenExpiracion   = DateTime.UtcNow.AddHours(24),
             };
 
             var id = await _usuarioRepo.AgregarAsync(usuario);
@@ -55,6 +81,18 @@ namespace BLL.Servicios
 
             usuario.IdUsuario = id;
             _logger.LogInfo($"BLL: Usuario registrado Id={id} email={usuario.Email}");
+
+            // Enviar email de verificación (si falla, el registro igual se completó)
+            try
+            {
+                await _emailServicio.EnviarVerificacionAsync(usuario.Email, usuario.Nombre, tokenRaw);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"BLL: No se pudo enviar email de verificación a {usuario.Email}", ex);
+                // No retornamos error: el usuario ya está creado, puede pedir reenvío
+            }
+
             return AuthResultado.Ok(usuario);
         }
 
@@ -79,14 +117,16 @@ namespace BLL.Servicios
             if (!BCrypt.Net.BCrypt.Verify(password, usuario.PasswordHash))
                 return AuthResultado.Error("Credenciales incorrectas.");
 
+            // Verificar que el email fue confirmado
+            if (!usuario.EmailVerificado)
+                return AuthResultado.EmailSinVerificar(usuario);
+
             await _usuarioRepo.ActualizarUltimoLoginAsync(usuario.IdUsuario);
             _logger.LogInfo($"BLL: Login exitoso Id={usuario.IdUsuario} email={usuario.Email}");
             return AuthResultado.Ok(usuario);
         }
 
         // ─── Login con Google ────────────────────────────────────────────────────
-        // El frontend envía el ID token de Google. Este método lo valida con la
-        // API de Google y crea o recupera el usuario correspondiente.
 
         public async Task<AuthResultado> LoginGoogleAsync(string idToken)
         {
@@ -112,20 +152,23 @@ namespace BLL.Servicios
 
             if (usuario == null)
             {
-                // Primera vez: crear usuario automáticamente con rol "Usuario"
+                // Primera vez: el email de Google ya está verificado por Google
                 usuario = new Usuario
                 {
-                    Nombre         = payload.GivenName  ?? payload.Name ?? "Usuario",
-                    Apellido       = payload.FamilyName ?? string.Empty,
-                    Email          = email,
-                    PasswordHash   = null,          // Google no usa contraseña
-                    RolId          = 2,
-                    RolNombre      = "Usuario",
-                    Activo         = true,
-                    AuthProvider   = "google",
-                    ProviderUserId = payload.Subject, // ID único de Google
-                    FechaCreacion  = DateTime.UtcNow,
-                    UltimoLogin    = DateTime.UtcNow,
+                    Nombre            = payload.GivenName  ?? payload.Name ?? "Usuario",
+                    Apellido          = payload.FamilyName ?? string.Empty,
+                    Email             = email,
+                    PasswordHash      = null,
+                    RolId             = 2,
+                    RolNombre         = "Usuario",
+                    Activo            = true,
+                    AuthProvider      = "google",
+                    ProviderUserId    = payload.Subject,
+                    FechaCreacion     = DateTime.UtcNow,
+                    UltimoLogin       = DateTime.UtcNow,
+                    EmailVerificado   = true,   // Google ya verificó el email
+                    TokenVerificacion = null,
+                    TokenExpiracion   = null,
                 };
 
                 var id = await _usuarioRepo.AgregarAsync(usuario);
@@ -144,7 +187,63 @@ namespace BLL.Servicios
             return AuthResultado.Ok(usuario);
         }
 
-        // ─── Obtener por ID (para /auth/me) ─────────────────────────────────────
+        // ─── Verificar email ─────────────────────────────────────────────────────
+
+        public async Task<AuthResultado> VerificarEmailAsync(string tokenRaw)
+        {
+            if (string.IsNullOrWhiteSpace(tokenRaw))
+                return AuthResultado.Error("Token de verificación inválido.");
+
+            string tokenHash = HashToken(tokenRaw);
+
+            var usuario = await _usuarioRepo.BuscarPorTokenHashAsync(tokenHash);
+            if (usuario == null)
+                return AuthResultado.Error("El enlace de verificación es inválido o ya fue utilizado.");
+
+            if (usuario.TokenExpiracion.HasValue && DateTime.UtcNow > usuario.TokenExpiracion.Value)
+                return AuthResultado.Error("El enlace de verificación expiró. Solicitá uno nuevo desde la página de login.");
+
+            await _usuarioRepo.MarcarEmailVerificadoAsync(usuario.IdUsuario);
+            _logger.LogInfo($"BLL: Email verificado para usuario Id={usuario.IdUsuario} email={usuario.Email}");
+
+            return AuthResultado.Ok(usuario);
+        }
+
+        // ─── Reenviar verificación ───────────────────────────────────────────────
+
+        public async Task<AuthResultado> ReenviarVerificacionAsync(string email)
+        {
+            if (string.IsNullOrWhiteSpace(email))
+                return AuthResultado.Error("El email es requerido.");
+
+            var usuario = await _usuarioRepo.BuscarPorEmailAsync(email);
+            if (usuario == null)
+                return AuthResultado.Error("No existe una cuenta con ese email.");
+
+            if (usuario.EmailVerificado)
+                return AuthResultado.Error("El email ya está verificado. Podés iniciar sesión.");
+
+            string tokenRaw  = GenerarTokenRaw();
+            string tokenHash = HashToken(tokenRaw);
+            DateTime expiry  = DateTime.UtcNow.AddHours(24);
+
+            await _usuarioRepo.ActualizarTokenVerificacionAsync(usuario.IdUsuario, tokenHash, expiry);
+
+            try
+            {
+                await _emailServicio.EnviarVerificacionAsync(usuario.Email, usuario.Nombre, tokenRaw);
+                _logger.LogInfo($"BLL: Email de verificación reenviado a {usuario.Email}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"BLL: Error al reenviar email de verificación a {usuario.Email}", ex);
+                return AuthResultado.Error("No se pudo enviar el email. Intentá de nuevo más tarde.");
+            }
+
+            return AuthResultado.Ok(usuario);
+        }
+
+        // ─── Obtener por ID ──────────────────────────────────────────────────────
 
         public async Task<Usuario?> ObtenerPorIdAsync(int id) =>
             await _usuarioRepo.ObtenerPorIdAsync(id);

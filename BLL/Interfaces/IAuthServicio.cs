@@ -9,5 +9,9 @@ namespace BLL.Interfaces
         Task<AuthResultado> LoginManualAsync(string email, string password);
         Task<AuthResultado> LoginGoogleAsync(string idToken);
         Task<Usuario?>      ObtenerPorIdAsync(int id);
+
+        // ─── Verificación de email ──────────────────────────────────────────────
+        Task<AuthResultado> VerificarEmailAsync(string tokenRaw);
+        Task<AuthResultado> ReenviarVerificacionAsync(string email);
     }
 }

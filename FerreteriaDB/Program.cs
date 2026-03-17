@@ -4,6 +4,7 @@ using DAL;
 using DAL.Repositorios;
 using FerreteriaDB.Data;
 using FerreteriaDB.Helpers;
+using FerreteriaDB.Services;
 using L;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
@@ -33,6 +34,7 @@ builder.Services.AddScoped<UsuarioRepositorio>();
 
 builder.Services.AddScoped<IProductoServicio,  ProductoServicio>();
 builder.Services.AddScoped<ICategoriaServicio, CategoriaServicio>();
+builder.Services.AddScoped<IEmailServicio,     EmailServicio>();
 builder.Services.AddScoped<IAuthServicio,      AuthServicio>();
 
 // ─── JWT Helper ──────────────────────────────────────────────────────────────

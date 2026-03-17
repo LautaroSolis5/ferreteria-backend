@@ -11,6 +11,7 @@ namespace FerreteriaDB.Controllers
     public record RegisterRequest(string Nombre, string Apellido, string Email, string Password);
     public record LoginRequest(string Email, string Password);
     public record GoogleLoginRequest(string IdToken);
+    public record ResendVerificationRequest(string Email);
 
     // ─── Controller ──────────────────────────────────────────────────────────────
 
@@ -28,6 +29,7 @@ namespace FerreteriaDB.Controllers
         }
 
         // POST /api/auth/register
+        // No devuelve JWT: el usuario debe verificar su email primero.
         [HttpPost("register")]
         public async Task<IActionResult> Register([FromBody] RegisterRequest req)
         {
@@ -37,8 +39,13 @@ namespace FerreteriaDB.Controllers
             if (!resultado.Exito)
                 return BadRequest(new { mensaje = resultado.Mensaje });
 
-            var token = _jwtHelper.GenerarToken(resultado.Usuario!);
-            return Ok(BuildResponse(resultado.Usuario!, token));
+            return Ok(new
+            {
+                exito         = true,
+                emailPendiente = true,
+                email         = resultado.Usuario!.Email,
+                mensaje       = "Registro exitoso. Te enviamos un email para verificar tu cuenta. Revisá tu bandeja de entrada (y spam)."
+            });
         }
 
         // POST /api/auth/login
@@ -48,7 +55,18 @@ namespace FerreteriaDB.Controllers
             var resultado = await _authServicio.LoginManualAsync(req.Email, req.Password);
 
             if (!resultado.Exito)
+            {
+                // Caso especial: credenciales correctas pero email sin verificar
+                if (resultado.RequiereVerificacion)
+                    return StatusCode(403, new
+                    {
+                        mensaje        = resultado.Mensaje,
+                        emailVerificado = false,
+                        email          = resultado.Usuario!.Email
+                    });
+
                 return Unauthorized(new { mensaje = resultado.Mensaje });
+            }
 
             var token = _jwtHelper.GenerarToken(resultado.Usuario!);
             return Ok(BuildResponse(resultado.Usuario!, token));
@@ -65,6 +83,42 @@ namespace FerreteriaDB.Controllers
 
             var token = _jwtHelper.GenerarToken(resultado.Usuario!);
             return Ok(BuildResponse(resultado.Usuario!, token));
+        }
+
+        // GET /api/auth/verify-email?token=xxx
+        [HttpGet("verify-email")]
+        public async Task<IActionResult> VerifyEmail([FromQuery] string token)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+                return BadRequest(new { mensaje = "Token no proporcionado." });
+
+            var resultado = await _authServicio.VerificarEmailAsync(token);
+
+            if (!resultado.Exito)
+                return BadRequest(new { mensaje = resultado.Mensaje });
+
+            return Ok(new
+            {
+                exito   = true,
+                mensaje = "¡Email verificado correctamente! Ya podés iniciar sesión.",
+                email   = resultado.Usuario!.Email
+            });
+        }
+
+        // POST /api/auth/resend-verification
+        [HttpPost("resend-verification")]
+        public async Task<IActionResult> ResendVerification([FromBody] ResendVerificationRequest req)
+        {
+            var resultado = await _authServicio.ReenviarVerificacionAsync(req.Email);
+
+            if (!resultado.Exito)
+                return BadRequest(new { mensaje = resultado.Mensaje });
+
+            return Ok(new
+            {
+                exito   = true,
+                mensaje = "Te reenviamos el email de verificación. Revisá tu bandeja de entrada."
+            });
         }
 
         // GET /api/auth/me  →  requiere token válido
@@ -91,6 +145,7 @@ namespace FerreteriaDB.Controllers
                 email          = usuario.Email,
                 rol            = usuario.RolNombre,
                 authProvider   = usuario.AuthProvider,
+                emailVerificado = usuario.EmailVerificado,
             });
         }
 
