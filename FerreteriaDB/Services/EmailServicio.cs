@@ -33,6 +33,7 @@ namespace FerreteriaDB.Services
             string destinatarioEmail, string nombre, string tokenRaw)
         {
             var frontendUrl     = _config["Email:FrontendBaseUrl"] ?? "https://ferreteria-adrogue.onrender.com";
+            _logger.LogInfo($"[EmailServicio] FrontendBaseUrl leído: '{frontendUrl}'");
             var verificationUrl = $"{frontendUrl}/verificar-email?token={tokenRaw}";
 
             var asunto   = "Verificá tu email – Ferretería Adrogué";
