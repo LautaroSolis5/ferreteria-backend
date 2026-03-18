@@ -14,6 +14,7 @@ namespace BLL.Interfaces
         Task<Pedido?>                        ObtenerPorIdAsync(int id);
         Task<IEnumerable<Pedido>>            ObtenerTodosAsync();
         Task<Resultado>                      ActualizarEstadoAsync(int id, string nuevoEstado);
+        Task<Resultado>                      ActualizarEstadoPagoAsync(int pedidoId, string estado);
         Task<IEnumerable<HorarioDisponible>> ObtenerHorariosDisponiblesAsync(DateTime fecha);
     }
 }

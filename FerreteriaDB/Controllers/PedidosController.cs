@@ -107,14 +107,29 @@ namespace FerreteriaDB.Controllers
             return Ok(new { mensaje = resultado.Mensaje });
         }
 
+        // ─── PUT /api/pedidos/{id}/pago-estado ───────────────────────────────────
+
+        [HttpPut("{id:int}/pago-estado")]
+        [Authorize(Roles = "Admin")]
+        public async Task<IActionResult> ActualizarEstadoPago(int id, [FromBody] ActualizarEstadoPagoRequest body)
+        {
+            var resultado = await _servicio.ActualizarEstadoPagoAsync(id, body.Estado);
+            if (!resultado.Exito)
+                return BadRequest(new { mensaje = resultado.Mensaje });
+            return Ok(new { mensaje = resultado.Mensaje });
+        }
+
         // ─── Helper ───────────────────────────────────────────────────────────────
 
         private int ObtenerUsuarioId()
         {
-            var claim = User.FindFirst("sub")?.Value;
+            // JwtSecurityTokenHandler mapea "sub" → ClaimTypes.NameIdentifier por defecto
+            var claim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                     ?? User.FindFirst("sub")?.Value;
             return int.TryParse(claim, out var id) ? id : 0;
         }
     }
 
     public record ActualizarEstadoRequest(string Estado);
+    public record ActualizarEstadoPagoRequest(string Estado);
 }

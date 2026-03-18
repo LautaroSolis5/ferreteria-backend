@@ -16,17 +16,20 @@ namespace BLL.Servicios
         private readonly PedidoRepositorio        _pedidoRepo;
         private readonly ProductoRepositorio       _productoRepo;
         private readonly NotificacionRepositorio   _notifRepo;
+        private readonly PagoRepositorio           _pagoRepo;
         private readonly AppLogger                 _logger;
 
         public PedidoServicio(
             PedidoRepositorio      pedidoRepo,
             ProductoRepositorio    productoRepo,
             NotificacionRepositorio notifRepo,
+            PagoRepositorio        pagoRepo,
             AppLogger              logger)
         {
             _pedidoRepo   = pedidoRepo;
             _productoRepo = productoRepo;
             _notifRepo    = notifRepo;
+            _pagoRepo     = pagoRepo;
             _logger       = logger;
         }
 
@@ -182,6 +185,24 @@ namespace BLL.Servicios
 
             _logger.LogInfo($"BLL: Pedido Id={id} estado -> {nuevoEstado}");
             return new Resultado { Exito = true, Mensaje = $"Estado actualizado a {nuevoEstado}." };
+        }
+
+        // ─── Actualizar estado de pago ───────────────────────────────────────────
+
+        public async Task<Resultado> ActualizarEstadoPagoAsync(int pedidoId, string estado)
+        {
+            var estadosValidos = new[] {
+                EstadosPago.Pendiente, EstadosPago.Aprobado,
+                EstadosPago.Rechazado, EstadosPago.Reembolsado
+            };
+            if (!Array.Exists(estadosValidos, e => e == estado))
+                return new Resultado { Exito = false, Mensaje = "Estado de pago inválido." };
+
+            var ok = await _pagoRepo.ActualizarEstadoAsync(pedidoId, estado);
+            if (!ok) return new Resultado { Exito = false, Mensaje = "Pago no encontrado para ese pedido." };
+
+            _logger.LogInfo($"BLL: Pago PedidoId={pedidoId} estado -> {estado}");
+            return new Resultado { Exito = true, Mensaje = $"Estado de pago actualizado a {estado}." };
         }
 
         // ─── Horarios disponibles ────────────────────────────────────────────────
