@@ -179,5 +179,58 @@ namespace DAL.Repositorios
                 return false;
             }
         }
+
+        /// <summary>
+        /// Descuenta stock atómicamente. Devuelve false si el stock es insuficiente.
+        /// La condición Stock >= @cantidad garantiza que no se llegue a negativo.
+        /// </summary>
+        public async Task<bool> DescontarStockAsync(int id, int cantidad)
+        {
+            try
+            {
+                using var conn = _conexion.ObtenerConexion();
+                await conn.OpenAsync();
+                var cmd = conn.CreateCommand();
+                cmd.CommandText = @"
+                    UPDATE Productos
+                    SET    Stock = Stock - @cantidad
+                    WHERE  Id = @id AND Stock >= @cantidad AND Activo = TRUE";
+                cmd.Parameters.AddWithValue("@id",       id);
+                cmd.Parameters.AddWithValue("@cantidad", cantidad);
+                var filas = await cmd.ExecuteNonQueryAsync();
+                if (filas > 0)
+                    _logger.LogInfo($"DAL: Stock descontado ProductoId={id} cantidad={cantidad}");
+                else
+                    _logger.LogWarning($"DAL: Stock insuficiente ProductoId={id} cantidad={cantidad}");
+                return filas > 0;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"DAL: Error al descontar stock ProductoId={id}", ex);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Restaura stock en caso de cancelación de pedido.
+        /// </summary>
+        public async Task RestaurarStockAsync(int id, int cantidad)
+        {
+            try
+            {
+                using var conn = _conexion.ObtenerConexion();
+                await conn.OpenAsync();
+                var cmd = conn.CreateCommand();
+                cmd.CommandText = "UPDATE Productos SET Stock = Stock + @cantidad WHERE Id = @id";
+                cmd.Parameters.AddWithValue("@id",       id);
+                cmd.Parameters.AddWithValue("@cantidad", cantidad);
+                await cmd.ExecuteNonQueryAsync();
+                _logger.LogInfo($"DAL: Stock restaurado ProductoId={id} cantidad={cantidad}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"DAL: Error al restaurar stock ProductoId={id}", ex);
+            }
+        }
     }
 }

@@ -73,7 +73,55 @@ namespace FerreteriaDB.Data
                     EmailVerificado   BOOLEAN   NOT NULL DEFAULT FALSE,
                     TokenVerificacion TEXT,
                     TokenExpiracion   TIMESTAMP
-                );";
+                );
+
+                -- Tablas de pedidos
+                CREATE TABLE IF NOT EXISTS Pedidos (
+                    Id                 SERIAL        PRIMARY KEY,
+                    UsuarioId          INTEGER       NOT NULL REFERENCES Usuarios(IdUsuario),
+                    Estado             TEXT          NOT NULL DEFAULT 'Pendiente',
+                    HorarioRetiro      TIMESTAMP     NOT NULL,
+                    FechaCreacion      TIMESTAMP     NOT NULL DEFAULT NOW(),
+                    FechaActualizacion TIMESTAMP     NOT NULL DEFAULT NOW(),
+                    Total              DECIMAL(18,2) NOT NULL,
+                    Notas              TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS PedidoItems (
+                    Id             SERIAL        PRIMARY KEY,
+                    PedidoId       INTEGER       NOT NULL REFERENCES Pedidos(Id) ON DELETE CASCADE,
+                    ProductoId     INTEGER       NOT NULL REFERENCES Productos(Id),
+                    NombreProducto TEXT          NOT NULL,
+                    PrecioUnitario DECIMAL(18,2) NOT NULL,
+                    Cantidad       INTEGER       NOT NULL,
+                    Subtotal       DECIMAL(18,2) NOT NULL
+                );
+
+                -- Pagos separado para compatibilidad con webhooks MercadoPago
+                CREATE TABLE IF NOT EXISTS Pagos (
+                    Id                 SERIAL        PRIMARY KEY,
+                    PedidoId           INTEGER       NOT NULL REFERENCES Pedidos(Id),
+                    MetodoPago         TEXT          NOT NULL,
+                    Estado             TEXT          NOT NULL DEFAULT 'Pendiente',
+                    Monto              DECIMAL(18,2) NOT NULL,
+                    ExternalId         TEXT,
+                    FechaCreacion      TIMESTAMP     NOT NULL DEFAULT NOW(),
+                    FechaActualizacion TIMESTAMP     NOT NULL DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS Notificaciones (
+                    Id            SERIAL    PRIMARY KEY,
+                    PedidoId      INTEGER   NOT NULL REFERENCES Pedidos(Id),
+                    Mensaje       TEXT      NOT NULL,
+                    Leida         BOOLEAN   NOT NULL DEFAULT FALSE,
+                    FechaCreacion TIMESTAMP NOT NULL DEFAULT NOW()
+                );
+
+                -- Índices de rendimiento
+                CREATE INDEX IF NOT EXISTS idx_pedidos_usuarioid    ON Pedidos(UsuarioId);
+                CREATE INDEX IF NOT EXISTS idx_pedidoitems_pedidoid ON PedidoItems(PedidoId);
+                CREATE INDEX IF NOT EXISTS idx_pagos_pedidoid       ON Pagos(PedidoId);
+                CREATE INDEX IF NOT EXISTS idx_notif_leida          ON Notificaciones(Leida);";
             cmd.ExecuteNonQuery();
         }
 

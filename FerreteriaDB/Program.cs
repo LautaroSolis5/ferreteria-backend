@@ -1,5 +1,6 @@
 using BLL.Interfaces;
 using BLL.Servicios;
+using DAL.Repositorios;
 using DAL;
 using DAL.Repositorios;
 using FerreteriaDB.Data;
@@ -33,10 +34,15 @@ builder.Services.AddScoped<UsuarioRepositorio>();
 // ─── DI: Servicios ───────────────────────────────────────────────────────────
 
 builder.Services.AddHttpClient("brevo");
-builder.Services.AddScoped<IProductoServicio,  ProductoServicio>();
-builder.Services.AddScoped<ICategoriaServicio, CategoriaServicio>();
-builder.Services.AddScoped<IEmailServicio,     EmailServicio>();
-builder.Services.AddScoped<IAuthServicio,      AuthServicio>();
+builder.Services.AddScoped<IProductoServicio,      ProductoServicio>();
+builder.Services.AddScoped<ICategoriaServicio,     CategoriaServicio>();
+builder.Services.AddScoped<IEmailServicio,         EmailServicio>();
+builder.Services.AddScoped<IAuthServicio,          AuthServicio>();
+builder.Services.AddScoped<PedidoRepositorio>();
+builder.Services.AddScoped<PagoRepositorio>();
+builder.Services.AddScoped<NotificacionRepositorio>();
+builder.Services.AddScoped<IPedidoServicio,        PedidoServicio>();
+builder.Services.AddScoped<INotificacionServicio,  NotificacionServicio>();
 
 // ─── JWT Helper ──────────────────────────────────────────────────────────────
 
