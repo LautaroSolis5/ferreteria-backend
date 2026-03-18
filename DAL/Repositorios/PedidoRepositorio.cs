@@ -191,6 +191,30 @@ namespace DAL.Repositorios
             }
         }
 
+        // ─── Helper: hidratar items de una lista de pedidos ──────────────────────
+
+        private async Task HidratarItemsAsync(NpgsqlConnection conn, List<Pedido> lista)
+        {
+            if (lista.Count == 0) return;
+            var ids = lista.ConvertAll(p => p.Id);
+            var cmdItems = conn.CreateCommand();
+            cmdItems.CommandText = @"
+                SELECT Id, PedidoId, ProductoId, NombreProducto, PrecioUnitario, Cantidad, Subtotal
+                FROM   PedidoItems
+                WHERE  PedidoId = ANY(@ids)
+                ORDER BY PedidoId, Id";
+            cmdItems.Parameters.AddWithValue("@ids", ids.ToArray());
+            var map = new Dictionary<int, Pedido>(lista.Count);
+            foreach (var p in lista) map[p.Id] = p;
+            using var reader = await cmdItems.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var item = MapItem(reader);
+                if (map.TryGetValue(item.PedidoId, out var pedido))
+                    pedido.Items.Add(item);
+            }
+        }
+
         // ─── Obtener por usuario ──────────────────────────────────────────────────
 
         public async Task<IEnumerable<Pedido>> ObtenerPorUsuarioAsync(int usuarioId)
@@ -203,13 +227,16 @@ namespace DAL.Repositorios
                 var cmd = conn.CreateCommand();
                 cmd.CommandText = SelectBase + " WHERE p.UsuarioId = @uid ORDER BY p.FechaCreacion DESC";
                 cmd.Parameters.AddWithValue("@uid", usuarioId);
-                using var reader = await cmd.ExecuteReaderAsync();
-                while (await reader.ReadAsync())
+                using (var reader = await cmd.ExecuteReaderAsync())
                 {
-                    var p = MapPedido(reader);
-                    p.Pago = MapPago(reader);
-                    lista.Add(p);
+                    while (await reader.ReadAsync())
+                    {
+                        var p = MapPedido(reader);
+                        p.Pago = MapPago(reader);
+                        lista.Add(p);
+                    }
                 }
+                await HidratarItemsAsync(conn, lista);
             }
             catch (Exception ex)
             {
@@ -229,13 +256,16 @@ namespace DAL.Repositorios
                 await conn.OpenAsync();
                 var cmd = conn.CreateCommand();
                 cmd.CommandText = SelectBase + " ORDER BY p.FechaCreacion DESC";
-                using var reader = await cmd.ExecuteReaderAsync();
-                while (await reader.ReadAsync())
+                using (var reader = await cmd.ExecuteReaderAsync())
                 {
-                    var p = MapPedido(reader);
-                    p.Pago = MapPago(reader);
-                    lista.Add(p);
+                    while (await reader.ReadAsync())
+                    {
+                        var p = MapPedido(reader);
+                        p.Pago = MapPago(reader);
+                        lista.Add(p);
+                    }
                 }
+                await HidratarItemsAsync(conn, lista);
             }
             catch (Exception ex)
             {
