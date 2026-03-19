@@ -31,7 +31,8 @@ namespace DAL.Repositorios
             FechaCreacion      = r.GetDateTime(6),
             FechaActualizacion = r.GetDateTime(7),
             Total              = r.GetDecimal(8),
-            Notas              = r.IsDBNull(9) ? null : r.GetString(9)
+            Notas              = r.IsDBNull(9) ? null : r.GetString(9),
+            StockDescontado    = !r.IsDBNull(17) && r.GetBoolean(17)
         };
 
         private static PedidoItem MapItem(NpgsqlDataReader r) => new PedidoItem
@@ -67,7 +68,8 @@ namespace DAL.Repositorios
                    p.Estado, p.HorarioRetiro, p.FechaCreacion, p.FechaActualizacion,
                    p.Total, p.Notas,
                    pg.Id, pg.MetodoPago, pg.Estado, pg.Monto, pg.ExternalId,
-                   pg.FechaCreacion, pg.FechaActualizacion
+                   pg.FechaCreacion, pg.FechaActualizacion,
+                   p.StockDescontado
             FROM   Pedidos p
             INNER JOIN Usuarios u  ON u.IdUsuario = p.UsuarioId
             LEFT  JOIN Pagos    pg ON pg.PedidoId  = p.Id";
@@ -272,6 +274,25 @@ namespace DAL.Repositorios
                 _logger.LogError("DAL: Error al obtener todos los pedidos", ex);
             }
             return lista;
+        }
+
+        // ─── Marcar stock como descontado ────────────────────────────────────────
+
+        public async Task MarcarStockDescontadoAsync(int pedidoId)
+        {
+            try
+            {
+                using var conn = _conexion.ObtenerConexion();
+                await conn.OpenAsync();
+                var cmd = conn.CreateCommand();
+                cmd.CommandText = "UPDATE Pedidos SET StockDescontado = TRUE WHERE Id = @id";
+                cmd.Parameters.AddWithValue("@id", pedidoId);
+                await cmd.ExecuteNonQueryAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"DAL: Error al marcar StockDescontado PedidoId={pedidoId}", ex);
+            }
         }
 
         // ─── Actualizar estado ────────────────────────────────────────────────────

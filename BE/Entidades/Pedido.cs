@@ -46,6 +46,8 @@ namespace BE.Entidades
         public decimal  Total              { get; set; }
         public string?  Notas              { get; set; }
 
+        public bool StockDescontado { get; set; }
+
         // Relaciones populadas en ObtenerPorIdAsync
         public List<PedidoItem> Items { get; set; } = new();
         public Pago?            Pago  { get; set; }

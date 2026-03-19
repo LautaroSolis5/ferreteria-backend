@@ -48,8 +48,7 @@ namespace BLL.Servicios
                 return new Resultado { Exito = false, Mensaje = "El horario de retiro está fuera del horario de atención." };
 
             // 2. Resolver productos (precio actual + nombre para snapshot) y validar stock
-            var items   = new List<PedidoItem>();
-            var stockDs = new List<(int ProductoId, int Cantidad)>(); // para rollback si falla
+            var items = new List<PedidoItem>();
 
             foreach (var req in request.Items)
             {
@@ -60,22 +59,9 @@ namespace BLL.Servicios
                 if (producto == null || !producto.Activo)
                     return new Resultado { Exito = false, Mensaje = $"El producto {req.ProductoId} no existe o está inactivo." };
 
-                // Descontar stock atómicamente
-                var ok = await _productoRepo.DescontarStockAsync(req.ProductoId, req.Cantidad);
-                if (!ok)
-                {
-                    // Restaurar los que ya se descontaron antes de este fallo
-                    foreach (var (pId, cant) in stockDs)
-                        await _productoRepo.RestaurarStockAsync(pId, cant);
+                if (producto.Stock < req.Cantidad)
+                    return new Resultado { Exito = false, Mensaje = $"Stock insuficiente para \"{producto.Nombre}\". Stock disponible: {producto.Stock}." };
 
-                    return new Resultado
-                    {
-                        Exito   = false,
-                        Mensaje = $"Stock insuficiente para \"{producto.Nombre}\". Stock disponible: {producto.Stock}."
-                    };
-                }
-
-                stockDs.Add((req.ProductoId, req.Cantidad));
                 items.Add(new PedidoItem
                 {
                     ProductoId     = req.ProductoId,
@@ -111,13 +97,7 @@ namespace BLL.Servicios
             // 5. Persistir (transacción interna en el repositorio)
             var pedidoId = await _pedidoRepo.AgregarAsync(pedido, pago);
             if (pedidoId == 0)
-            {
-                // Rollback de stock si la transacción de DB falló
-                foreach (var (pId, cant) in stockDs)
-                    await _productoRepo.RestaurarStockAsync(pId, cant);
-
                 return new Resultado { Exito = false, Mensaje = "Error al guardar el pedido. Intente nuevamente." };
-            }
 
             // 6. Crear notificación para admin (no bloquea si falla)
             try
@@ -169,19 +149,16 @@ namespace BLL.Servicios
             if (!Array.Exists(estadosValidos, e => e == nuevoEstado))
                 return new Resultado { Exito = false, Mensaje = "Estado de pedido inválido." };
 
-            // Si se cancela, restaurar stock
-            if (nuevoEstado == EstadosPedido.Cancelado)
-            {
-                var pedido = await _pedidoRepo.ObtenerPorIdAsync(id);
-                if (pedido != null)
-                {
-                    foreach (var item in pedido.Items)
-                        await _productoRepo.RestaurarStockAsync(item.ProductoId, item.Cantidad);
-                }
-            }
-
             var ok = await _pedidoRepo.ActualizarEstadoAsync(id, nuevoEstado);
             if (!ok) return new Resultado { Exito = false, Mensaje = "Pedido no encontrado." };
+
+            // Descontar stock cuando el pedido se marca como Retirado y el pago ya está Aprobado
+            if (nuevoEstado == EstadosPedido.Retirado)
+            {
+                var pedido = await _pedidoRepo.ObtenerPorIdAsync(id);
+                if (pedido != null && !pedido.StockDescontado && pedido.Pago?.Estado == EstadosPago.Aprobado)
+                    await DescontarStockFinalAsync(pedido);
+            }
 
             _logger.LogInfo($"BLL: Pedido Id={id} estado -> {nuevoEstado}");
             return new Resultado { Exito = true, Mensaje = $"Estado actualizado a {nuevoEstado}." };
@@ -201,8 +178,26 @@ namespace BLL.Servicios
             var ok = await _pagoRepo.ActualizarEstadoAsync(pedidoId, estado);
             if (!ok) return new Resultado { Exito = false, Mensaje = "Pago no encontrado para ese pedido." };
 
+            // Descontar stock cuando el pago se aprueba y el pedido ya está Retirado
+            if (estado == EstadosPago.Aprobado)
+            {
+                var pedido = await _pedidoRepo.ObtenerPorIdAsync(pedidoId);
+                if (pedido != null && !pedido.StockDescontado && pedido.Estado == EstadosPedido.Retirado)
+                    await DescontarStockFinalAsync(pedido);
+            }
+
             _logger.LogInfo($"BLL: Pago PedidoId={pedidoId} estado -> {estado}");
             return new Resultado { Exito = true, Mensaje = $"Estado de pago actualizado a {estado}." };
+        }
+
+        // ─── Helper: descontar stock al finalizar pedido ──────────────────────────
+
+        private async Task DescontarStockFinalAsync(Pedido pedido)
+        {
+            foreach (var item in pedido.Items)
+                await _productoRepo.DescontarStockAsync(item.ProductoId, item.Cantidad);
+            await _pedidoRepo.MarcarStockDescontadoAsync(pedido.Id);
+            _logger.LogInfo($"BLL: Stock descontado para pedido Id={pedido.Id} (Retirado + Aprobado)");
         }
 
         // ─── Horarios disponibles ────────────────────────────────────────────────
