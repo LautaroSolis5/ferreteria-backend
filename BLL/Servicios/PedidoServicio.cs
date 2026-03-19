@@ -17,20 +17,23 @@ namespace BLL.Servicios
         private readonly ProductoRepositorio       _productoRepo;
         private readonly NotificacionRepositorio   _notifRepo;
         private readonly PagoRepositorio           _pagoRepo;
+        private readonly IEmailServicio            _emailServicio;
         private readonly AppLogger                 _logger;
 
         public PedidoServicio(
-            PedidoRepositorio      pedidoRepo,
-            ProductoRepositorio    productoRepo,
+            PedidoRepositorio       pedidoRepo,
+            ProductoRepositorio     productoRepo,
             NotificacionRepositorio notifRepo,
-            PagoRepositorio        pagoRepo,
-            AppLogger              logger)
+            PagoRepositorio         pagoRepo,
+            IEmailServicio          emailServicio,
+            AppLogger               logger)
         {
-            _pedidoRepo   = pedidoRepo;
-            _productoRepo = productoRepo;
-            _notifRepo    = notifRepo;
-            _pagoRepo     = pagoRepo;
-            _logger       = logger;
+            _pedidoRepo    = pedidoRepo;
+            _productoRepo  = productoRepo;
+            _notifRepo     = notifRepo;
+            _pagoRepo      = pagoRepo;
+            _emailServicio = emailServicio;
+            _logger        = logger;
         }
 
         // ─── Crear pedido ─────────────────────────────────────────────────────────
@@ -99,19 +102,26 @@ namespace BLL.Servicios
             if (pedidoId == 0)
                 return new Resultado { Exito = false, Mensaje = "Error al guardar el pedido. Intente nuevamente." };
 
-            // 6. Crear notificación para admin (no bloquea si falla)
+            // 6. Crear notificación para admin + email de confirmación al usuario (no bloquean si fallan)
             try
             {
                 var mensaje = ConstruirMensajeNotificacion(pedidoId, request, items, total);
-                await _notifRepo.AgregarAsync(new Notificacion
-                {
-                    PedidoId = pedidoId,
-                    Mensaje  = mensaje
-                });
+                await _notifRepo.AgregarAsync(new Notificacion { PedidoId = pedidoId, Mensaje = mensaje });
             }
             catch (Exception ex)
             {
                 _logger.LogError($"BLL: No se pudo crear notificación para pedido Id={pedidoId}", ex);
+            }
+
+            try
+            {
+                var pedidoCompleto = await _pedidoRepo.ObtenerPorIdAsync(pedidoId);
+                if (pedidoCompleto != null)
+                    await _emailServicio.EnviarConfirmacionPedidoAsync(pedidoCompleto);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"BLL: No se pudo enviar email de confirmación pedido Id={pedidoId}", ex);
             }
 
             _logger.LogInfo($"BLL: Pedido creado Id={pedidoId} UsuarioId={usuarioId} Total={total}");
@@ -153,11 +163,24 @@ namespace BLL.Servicios
             if (!ok) return new Resultado { Exito = false, Mensaje = "Pedido no encontrado." };
 
             // Descontar stock cuando el pedido se marca como Retirado y el pago ya está Aprobado
-            if (nuevoEstado == EstadosPedido.Retirado)
+            // + enviar email de actualización al usuario
+            try
             {
                 var pedido = await _pedidoRepo.ObtenerPorIdAsync(id);
-                if (pedido != null && !pedido.StockDescontado && pedido.Pago?.Estado == EstadosPago.Aprobado)
-                    await DescontarStockFinalAsync(pedido);
+                if (pedido != null)
+                {
+                    if (nuevoEstado == EstadosPedido.Retirado
+                        && !pedido.StockDescontado
+                        && pedido.Pago?.Estado == EstadosPago.Aprobado)
+                        await DescontarStockFinalAsync(pedido);
+
+                    await _emailServicio.EnviarActualizacionPedidoAsync(
+                        pedido, $"Estado del pedido actualizado a: {nuevoEstado}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"BLL: Error post-actualización estado pedido Id={id}", ex);
             }
 
             _logger.LogInfo($"BLL: Pedido Id={id} estado -> {nuevoEstado}");
@@ -179,11 +202,24 @@ namespace BLL.Servicios
             if (!ok) return new Resultado { Exito = false, Mensaje = "Pago no encontrado para ese pedido." };
 
             // Descontar stock cuando el pago se aprueba y el pedido ya está Retirado
-            if (estado == EstadosPago.Aprobado)
+            // + enviar email de actualización al usuario
+            try
             {
                 var pedido = await _pedidoRepo.ObtenerPorIdAsync(pedidoId);
-                if (pedido != null && !pedido.StockDescontado && pedido.Estado == EstadosPedido.Retirado)
-                    await DescontarStockFinalAsync(pedido);
+                if (pedido != null)
+                {
+                    if (estado == EstadosPago.Aprobado
+                        && !pedido.StockDescontado
+                        && pedido.Estado == EstadosPedido.Retirado)
+                        await DescontarStockFinalAsync(pedido);
+
+                    await _emailServicio.EnviarActualizacionPedidoAsync(
+                        pedido, $"Estado del pago actualizado a: {estado}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"BLL: Error post-actualización pago PedidoId={pedidoId}", ex);
             }
 
             _logger.LogInfo($"BLL: Pago PedidoId={pedidoId} estado -> {estado}");

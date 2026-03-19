@@ -8,12 +8,16 @@ namespace BLL.Interfaces
     /// </summary>
     public interface IEmailServicio
     {
-        /// <summary>
-        /// Envía el email de verificación de cuenta.
-        /// </summary>
-        /// <param name="destinatarioEmail">Email del usuario recién registrado.</param>
-        /// <param name="nombre">Nombre del usuario para el saludo.</param>
-        /// <param name="tokenRaw">Token en texto plano (va en el enlace del email).</param>
+        /// <summary>Envía el email de verificación de cuenta.</summary>
         Task EnviarVerificacionAsync(string destinatarioEmail, string nombre, string tokenRaw);
+
+        /// <summary>Envía al usuario la confirmación de su pedido recién creado.</summary>
+        Task EnviarConfirmacionPedidoAsync(BE.Entidades.Pedido pedido);
+
+        /// <summary>
+        /// Envía al usuario una actualización de su pedido
+        /// (cambio de estado o de estado de pago).
+        /// </summary>
+        Task EnviarActualizacionPedidoAsync(BE.Entidades.Pedido pedido, string descripcionCambio);
     }
 }
