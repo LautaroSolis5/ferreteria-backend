@@ -132,10 +132,12 @@ namespace FerreteriaDB.Data
         {
             var cmd = conn.CreateCommand();
             cmd.CommandText = @"
-                ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS EmailVerificado   BOOLEAN   NOT NULL DEFAULT FALSE;
-                ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS TokenVerificacion TEXT;
-                ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS TokenExpiracion   TIMESTAMP;
-                ALTER TABLE Pedidos  ADD COLUMN IF NOT EXISTS StockDescontado   BOOLEAN   NOT NULL DEFAULT FALSE;";
+                ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS EmailVerificado             BOOLEAN   NOT NULL DEFAULT FALSE;
+                ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS TokenVerificacion           TEXT;
+                ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS TokenExpiracion             TIMESTAMP;
+                ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS TokenRecuperacion           TEXT;
+                ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS TokenRecuperacionExpiracion TIMESTAMP;
+                ALTER TABLE Pedidos  ADD COLUMN IF NOT EXISTS StockDescontado             BOOLEAN   NOT NULL DEFAULT FALSE;";
             cmd.ExecuteNonQuery();
         }
 

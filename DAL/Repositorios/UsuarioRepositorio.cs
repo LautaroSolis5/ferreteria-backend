@@ -15,12 +15,13 @@ namespace DAL.Repositorios
         private readonly Conexion  _conexion;
         private readonly AppLogger _logger;
 
-        // Columnas: 0-11 base + 12-14 verificación de email
+        // Columnas: 0-11 base + 12-14 verificación de email + 15-16 recuperación de contraseña
         private const string SelectBase = @"
             SELECT u.IdUsuario, u.Nombre, u.Apellido, u.Email, u.PasswordHash,
                    u.RolId, r.NombreRol, u.Activo, u.AuthProvider,
                    u.ProviderUserId, u.FechaCreacion, u.UltimoLogin,
-                   u.EmailVerificado, u.TokenVerificacion, u.TokenExpiracion
+                   u.EmailVerificado, u.TokenVerificacion, u.TokenExpiracion,
+                   u.TokenRecuperacion, u.TokenRecuperacionExpiracion
             FROM   Usuarios u
             INNER JOIN Roles r ON r.IdRol = u.RolId";
 
@@ -46,9 +47,11 @@ namespace DAL.Repositorios
             ProviderUserId    = r.IsDBNull(9)  ? null            : r.GetString(9),
             FechaCreacion     = r.GetDateTime(10),
             UltimoLogin       = r.IsDBNull(11) ? (DateTime?)null : r.GetDateTime(11),
-            EmailVerificado   = r.GetBoolean(12),
-            TokenVerificacion = r.IsDBNull(13) ? null            : r.GetString(13),
-            TokenExpiracion   = r.IsDBNull(14) ? (DateTime?)null : r.GetDateTime(14),
+            EmailVerificado              = r.GetBoolean(12),
+            TokenVerificacion            = r.IsDBNull(13) ? null            : r.GetString(13),
+            TokenExpiracion              = r.IsDBNull(14) ? (DateTime?)null : r.GetDateTime(14),
+            TokenRecuperacion            = r.IsDBNull(15) ? null            : r.GetString(15),
+            TokenRecuperacionExpiracion  = r.IsDBNull(16) ? (DateTime?)null : r.GetDateTime(16),
         };
 
         // ─── Consultas ───────────────────────────────────────────────────────────
@@ -225,6 +228,105 @@ namespace DAL.Repositorios
             catch (Exception ex)
             {
                 _logger.LogError($"DAL: Error al actualizar token de verificación Id={idUsuario}", ex);
+            }
+        }
+
+        // ─── Recuperación de contraseña ──────────────────────────────────────────
+
+        /// <summary>Busca usuario por el HASH del token de recuperación (token aún no usado).</summary>
+        public async Task<Usuario?> BuscarPorTokenRecuperacionAsync(string tokenHash)
+        {
+            try
+            {
+                using var conn = _conexion.ObtenerConexion();
+                await conn.OpenAsync();
+                var cmd = conn.CreateCommand();
+                cmd.CommandText = SelectBase +
+                    " WHERE u.TokenRecuperacion = @hash AND u.TokenRecuperacion IS NOT NULL";
+                cmd.Parameters.AddWithValue("@hash", tokenHash);
+                using var reader = await cmd.ExecuteReaderAsync();
+                if (await reader.ReadAsync()) return MapUsuario(reader);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("DAL: Error al buscar usuario por token de recuperación", ex);
+            }
+            return null;
+        }
+
+        /// <summary>Guarda el hash del token de recuperación y su fecha de expiración.</summary>
+        public async Task GuardarTokenRecuperacionAsync(int idUsuario, string tokenHash, DateTime expiracion)
+        {
+            try
+            {
+                using var conn = _conexion.ObtenerConexion();
+                await conn.OpenAsync();
+                var cmd = conn.CreateCommand();
+                cmd.CommandText = @"
+                    UPDATE Usuarios
+                    SET TokenRecuperacion            = @hash,
+                        TokenRecuperacionExpiracion  = @exp
+                    WHERE IdUsuario = @id";
+                cmd.Parameters.AddWithValue("@hash", tokenHash);
+                cmd.Parameters.AddWithValue("@exp",  expiracion);
+                cmd.Parameters.AddWithValue("@id",   idUsuario);
+                await cmd.ExecuteNonQueryAsync();
+                _logger.LogInfo($"DAL: Token recuperación guardado para IdUsuario={idUsuario}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"DAL: Error al guardar token de recuperación Id={idUsuario}", ex);
+            }
+        }
+
+        /// <summary>Invalida el token de recuperación sin cambiar la contraseña (token expirado).</summary>
+        public async Task LimpiarTokenRecuperacionAsync(int idUsuario)
+        {
+            try
+            {
+                using var conn = _conexion.ObtenerConexion();
+                await conn.OpenAsync();
+                var cmd = conn.CreateCommand();
+                cmd.CommandText = @"
+                    UPDATE Usuarios
+                    SET TokenRecuperacion            = NULL,
+                        TokenRecuperacionExpiracion  = NULL
+                    WHERE IdUsuario = @id";
+                cmd.Parameters.AddWithValue("@id", idUsuario);
+                await cmd.ExecuteNonQueryAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"DAL: Error al limpiar token de recuperación Id={idUsuario}", ex);
+            }
+        }
+
+        /// <summary>
+        /// Actualiza el PasswordHash e invalida el token de recuperación en una sola operación.
+        /// </summary>
+        public async Task<bool> ActualizarPasswordHashAsync(int idUsuario, string nuevoHash)
+        {
+            try
+            {
+                using var conn = _conexion.ObtenerConexion();
+                await conn.OpenAsync();
+                var cmd = conn.CreateCommand();
+                cmd.CommandText = @"
+                    UPDATE Usuarios
+                    SET PasswordHash                 = @hash,
+                        TokenRecuperacion            = NULL,
+                        TokenRecuperacionExpiracion  = NULL
+                    WHERE IdUsuario = @id";
+                cmd.Parameters.AddWithValue("@hash", nuevoHash);
+                cmd.Parameters.AddWithValue("@id",   idUsuario);
+                var filas = await cmd.ExecuteNonQueryAsync();
+                _logger.LogInfo($"DAL: PasswordHash actualizado para IdUsuario={idUsuario}");
+                return filas > 0;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"DAL: Error al actualizar PasswordHash Id={idUsuario}", ex);
+                return false;
             }
         }
     }

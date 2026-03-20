@@ -11,6 +11,12 @@ namespace BLL.Interfaces
         /// <summary>Envía el email de verificación de cuenta.</summary>
         Task EnviarVerificacionAsync(string destinatarioEmail, string nombre, string tokenRaw);
 
+        /// <summary>
+        /// Envía el email con el enlace de recuperación de contraseña.
+        /// El EmailServicio construye la URL usando FrontendBaseUrl + tokenRaw.
+        /// </summary>
+        Task EnviarRecuperacionPasswordAsync(string destinatarioEmail, string nombre, string tokenRaw);
+
         /// <summary>Envía al usuario la confirmación de su pedido recién creado.</summary>
         Task EnviarConfirmacionPedidoAsync(BE.Entidades.Pedido pedido);
 

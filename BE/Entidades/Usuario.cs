@@ -22,5 +22,11 @@ namespace BE.Entidades
         public bool      EmailVerificado   { get; set; } = false;
         public string?   TokenVerificacion { get; set; }  // SHA256 hash
         public DateTime? TokenExpiracion   { get; set; }
+
+        // ─── Recuperación de contraseña ──────────────────────────────────────────
+        // Mismo patrón: solo el hash SHA256 se guarda. El token raw va en el email.
+        // Expira en 1 hora. Se invalida (NULL) inmediatamente tras usarse.
+        public string?   TokenRecuperacion            { get; set; }  // SHA256 hash
+        public DateTime? TokenRecuperacionExpiracion  { get; set; }
     }
 }

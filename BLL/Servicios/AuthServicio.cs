@@ -247,5 +247,121 @@ namespace BLL.Servicios
 
         public async Task<Usuario?> ObtenerPorIdAsync(int id) =>
             await _usuarioRepo.ObtenerPorIdAsync(id);
+
+        // ─── Solicitar recuperación de contraseña ────────────────────────────────
+
+        public async Task<AuthResultado> SolicitarRecuperacionAsync(string email)
+        {
+            // Respuesta genérica siempre — nunca revela si el email existe (anti-enumeración).
+            const string mensajeGenerico =
+                "Si ese email está registrado, en breve recibirás un enlace para restablecer tu contraseña.";
+
+            if (string.IsNullOrWhiteSpace(email))
+                return AuthResultado.Ok(null!);  // silencioso
+
+            var usuario = await _usuarioRepo.BuscarPorEmailAsync(email.ToLower().Trim());
+
+            if (usuario == null)
+            {
+                // No existe: log interno, respuesta genérica (no revelar)
+                _logger.LogInfo($"BLL: SolicitarRecuperación — email no encontrado: {email}");
+                return new AuthResultado { Exito = true, Mensaje = mensajeGenerico };
+            }
+
+            if (string.IsNullOrEmpty(usuario.PasswordHash))
+            {
+                // Cuenta Google — no tiene contraseña local: log interno, respuesta genérica
+                _logger.LogInfo($"BLL: SolicitarRecuperación — cuenta Google (sin contraseña local): {email}");
+                return new AuthResultado { Exito = true, Mensaje = mensajeGenerico };
+            }
+
+            // Generar token raw (64 hex chars) → solo el hash va a la DB
+            string tokenRaw  = GenerarTokenRaw();
+            string tokenHash = HashToken(tokenRaw);
+            var    expiry    = DateTime.UtcNow.AddHours(1);   // 1 hora de vida
+
+            await _usuarioRepo.GuardarTokenRecuperacionAsync(usuario.IdUsuario, tokenHash, expiry);
+
+            try
+            {
+                // EmailServicio construye la URL interna igual que en verificación de email
+                await _emailServicio.EnviarRecuperacionPasswordAsync(
+                    usuario.Email, usuario.Nombre, tokenRaw);
+                _logger.LogInfo($"BLL: Email de recuperación enviado a {usuario.Email}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"BLL: No se pudo enviar email de recuperación a {usuario.Email}", ex);
+                // No revelar el error al usuario — igual retornamos genérico
+            }
+
+            return new AuthResultado { Exito = true, Mensaje = mensajeGenerico };
+        }
+
+        // ─── Restablecer contraseña con token ────────────────────────────────────
+
+        public async Task<AuthResultado> RestablecerPasswordAsync(string tokenRaw, string nuevaPassword)
+        {
+            if (string.IsNullOrWhiteSpace(tokenRaw))
+                return AuthResultado.Error("Token inválido.");
+
+            if (string.IsNullOrWhiteSpace(nuevaPassword) || nuevaPassword.Length < 6)
+                return AuthResultado.Error("La nueva contraseña debe tener al menos 6 caracteres.");
+
+            string tokenHash = HashToken(tokenRaw);
+            var usuario = await _usuarioRepo.BuscarPorTokenRecuperacionAsync(tokenHash);
+
+            if (usuario == null)
+                return AuthResultado.Error("El enlace es inválido o ya fue utilizado.");
+
+            if (usuario.TokenRecuperacionExpiracion.HasValue &&
+                DateTime.UtcNow > usuario.TokenRecuperacionExpiracion.Value)
+            {
+                // Invalidar el token expirado (NULL) sin cambiar la contraseña
+                await _usuarioRepo.LimpiarTokenRecuperacionAsync(usuario.IdUsuario);
+                _logger.LogInfo($"BLL: Token recuperación expirado para IdUsuario={usuario.IdUsuario}");
+                return AuthResultado.Error("El enlace expiró. Solicitá uno nuevo desde la página de inicio de sesión.");
+            }
+
+            string nuevoHash = BCrypt.Net.BCrypt.HashPassword(nuevaPassword, workFactor: 12);
+            var ok = await _usuarioRepo.ActualizarPasswordHashAsync(usuario.IdUsuario, nuevoHash);
+
+            if (!ok) return AuthResultado.Error("Error al actualizar la contraseña. Intentá de nuevo.");
+
+            _logger.LogInfo($"BLL: Contraseña restablecida para IdUsuario={usuario.IdUsuario} email={usuario.Email}");
+            return new AuthResultado { Exito = true, Mensaje = "Contraseña actualizada correctamente. Ya podés iniciar sesión." };
+        }
+
+        // ─── Cambiar contraseña (usuario logueado) ───────────────────────────────
+
+        public async Task<AuthResultado> CambiarPasswordAsync(
+            int usuarioId, string passwordActual, string nuevaPassword)
+        {
+            if (string.IsNullOrWhiteSpace(passwordActual) || string.IsNullOrWhiteSpace(nuevaPassword))
+                return AuthResultado.Error("Todos los campos son requeridos.");
+
+            if (nuevaPassword.Length < 6)
+                return AuthResultado.Error("La nueva contraseña debe tener al menos 6 caracteres.");
+
+            var usuario = await _usuarioRepo.ObtenerPorIdAsync(usuarioId);
+            if (usuario == null) return AuthResultado.Error("Usuario no encontrado.");
+
+            if (string.IsNullOrEmpty(usuario.PasswordHash))
+                return AuthResultado.Error("Tu cuenta usa Google para iniciar sesión y no tiene contraseña local.");
+
+            if (!BCrypt.Net.BCrypt.Verify(passwordActual, usuario.PasswordHash))
+                return AuthResultado.Error("La contraseña actual es incorrecta.");
+
+            if (BCrypt.Net.BCrypt.Verify(nuevaPassword, usuario.PasswordHash))
+                return AuthResultado.Error("La nueva contraseña debe ser diferente a la actual.");
+
+            string nuevoHash = BCrypt.Net.BCrypt.HashPassword(nuevaPassword, workFactor: 12);
+            var ok = await _usuarioRepo.ActualizarPasswordHashAsync(usuarioId, nuevoHash);
+
+            if (!ok) return AuthResultado.Error("Error al guardar la nueva contraseña. Intentá de nuevo.");
+
+            _logger.LogInfo($"BLL: Contraseña cambiada por el usuario IdUsuario={usuarioId}");
+            return new AuthResultado { Exito = true, Mensaje = "Contraseña actualizada correctamente." };
+        }
     }
 }

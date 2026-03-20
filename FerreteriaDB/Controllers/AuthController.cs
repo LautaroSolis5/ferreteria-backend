@@ -12,6 +12,9 @@ namespace FerreteriaDB.Controllers
     public record LoginRequest(string Email, string Password);
     public record GoogleLoginRequest(string IdToken);
     public record ResendVerificationRequest(string Email);
+    public record ForgotPasswordRequest(string Email);
+    public record ResetPasswordRequest(string Token, string NuevaPassword);
+    public record ChangePasswordRequest(string PasswordActual, string NuevaPassword, string ConfirmarPassword);
 
     // ─── Controller ──────────────────────────────────────────────────────────────
 
@@ -147,6 +150,50 @@ namespace FerreteriaDB.Controllers
                 authProvider   = usuario.AuthProvider,
                 emailVerificado = usuario.EmailVerificado,
             });
+        }
+
+        // POST /api/auth/forgot-password
+        // SIEMPRE devuelve 200 con el mismo mensaje → no revela si el email existe
+        [HttpPost("forgot-password")]
+        public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest req)
+        {
+            await _authServicio.SolicitarRecuperacionAsync(req.Email ?? string.Empty);
+            return Ok(new
+            {
+                exito   = true,
+                mensaje = "Si ese email está registrado, en breve recibirás un enlace para restablecer tu contraseña. Revisá tu bandeja de entrada (y spam)."
+            });
+        }
+
+        // POST /api/auth/reset-password
+        [HttpPost("reset-password")]
+        public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest req)
+        {
+            var resultado = await _authServicio.RestablecerPasswordAsync(req.Token, req.NuevaPassword);
+            if (!resultado.Exito)
+                return BadRequest(new { mensaje = resultado.Mensaje });
+
+            return Ok(new { exito = true, mensaje = resultado.Mensaje });
+        }
+
+        // POST /api/auth/change-password  →  requiere JWT válido
+        [HttpPost("change-password")]
+        [Authorize]
+        public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest req)
+        {
+            if (req.NuevaPassword != req.ConfirmarPassword)
+                return BadRequest(new { mensaje = "La nueva contraseña y la confirmación no coinciden." });
+
+            var subClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                        ?? User.FindFirst("sub")?.Value;
+            if (!int.TryParse(subClaim, out int userId))
+                return Unauthorized(new { mensaje = "Token inválido." });
+
+            var resultado = await _authServicio.CambiarPasswordAsync(userId, req.PasswordActual, req.NuevaPassword);
+            if (!resultado.Exito)
+                return BadRequest(new { mensaje = resultado.Mensaje });
+
+            return Ok(new { exito = true, mensaje = resultado.Mensaje });
         }
 
         // ─── Helper privado ───────────────────────────────────────────────────────

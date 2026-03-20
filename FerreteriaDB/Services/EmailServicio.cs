@@ -81,6 +81,23 @@ namespace FerreteriaDB.Services
 
         // ─── Confirmación de pedido ───────────────────────────────────────────────
 
+        // ─── Propiedad pública para que BLL pueda construir URLs si necesita ────────
+        public string FrontendBaseUrl =>
+            _config["Email:FrontendBaseUrl"] ?? "https://ferreteria-adrogue.onrender.com";
+
+        // ─── Recuperación de contraseña ───────────────────────────────────────────
+
+        public async Task EnviarRecuperacionPasswordAsync(
+            string destinatarioEmail, string nombre, string tokenRaw)
+        {
+            var recuperacionUrl = $"{FrontendBaseUrl}/restablecer-password?token={tokenRaw}";
+            var asunto          = "🔑 Recuperá tu contraseña – Ferretería Adrogué";
+            var htmlBody        = BuildRecuperacionEmail(nombre, recuperacionUrl);
+            await EnviarAsync(destinatarioEmail, nombre, asunto, htmlBody);
+        }
+
+        // ─── Confirmación de pedido ───────────────────────────────────────────────
+
         public async Task EnviarConfirmacionPedidoAsync(Pedido pedido)
         {
             var asunto   = $"✅ Pedido #{pedido.Id} confirmado – Ferretería Adrogué";
@@ -386,6 +403,85 @@ namespace FerreteriaDB.Services
 </body>
 </html>";
         }
+
+        // ─── Template: Recuperación de contraseña ─────────────────────────────────
+
+        private static string BuildRecuperacionEmail(string nombre, string recuperacionUrl) => $@"
+<!DOCTYPE html>
+<html lang=""es"">
+<head><meta charset=""UTF-8""><meta name=""viewport"" content=""width=device-width,initial-scale=1""></head>
+<body style=""margin:0;padding:0;background:#f4f4f4;font-family:Arial,Helvetica,sans-serif"">
+<table width=""100%"" cellpadding=""0"" cellspacing=""0"" style=""background:#f4f4f4;padding:40px 0"">
+  <tr><td align=""center"">
+    <table width=""600"" cellpadding=""0"" cellspacing=""0""
+           style=""background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08)"">
+
+      <!-- Header -->
+      <tr><td style=""background:#FF6B00;padding:32px 40px;text-align:center"">
+        <h1 style=""margin:0;color:#fff;font-size:26px;font-weight:700"">🔧 Ferretería Adrogué</h1>
+        <p style=""margin:8px 0 0;color:rgba(255,255,255,0.85);font-size:14px"">Av. Espora 1180, Adrogué</p>
+      </td></tr>
+
+      <!-- Cuerpo -->
+      <tr><td style=""padding:40px 40px 32px"">
+        <h2 style=""margin:0 0 16px;color:#1a1a2e;font-size:22px"">
+          ¡Hola, {nombre}!
+        </h2>
+        <p style=""margin:0 0 12px;color:#444;font-size:15px;line-height:1.6"">
+          Recibimos una solicitud para restablecer la contraseña de tu cuenta en
+          <strong>Ferretería Adrogué</strong>.
+        </p>
+        <p style=""margin:0 0 28px;color:#444;font-size:15px;line-height:1.6"">
+          Hacé clic en el botón para crear una nueva contraseña:
+        </p>
+
+        <!-- Botón -->
+        <table cellpadding=""0"" cellspacing=""0"" style=""margin:0 auto 28px"">
+          <tr>
+            <td align=""center"" style=""border-radius:8px;background:#FF6B00"">
+              <a href=""{recuperacionUrl}""
+                 target=""_blank""
+                 style=""display:inline-block;padding:14px 36px;color:#ffffff;
+                         font-size:15px;font-weight:700;text-decoration:none;
+                         border-radius:8px;letter-spacing:0.2px"">
+                🔑 Restablecer mi contraseña
+              </a>
+            </td>
+          </tr>
+        </table>
+
+        <!-- Aviso de expiración -->
+        <div style=""background:#fff8f0;border-left:4px solid #FF6B00;padding:12px 16px;border-radius:0 6px 6px 0;margin-bottom:20px"">
+          <p style=""margin:0;color:#666;font-size:13px"">
+            ⏱ Este enlace expira en <strong>1 hora</strong>.
+            Si expiró, podés solicitar uno nuevo desde la página de inicio de sesión.
+          </p>
+        </div>
+
+        <!-- Aviso de seguridad -->
+        <div style=""background:#fef2f2;border-left:4px solid #ef4444;padding:12px 16px;border-radius:0 6px 6px 0"">
+          <p style=""margin:0;color:#991b1b;font-size:13px"">
+            🔒 Si no solicitaste este cambio, ignorá este email.
+            Tu contraseña actual no fue modificada.
+          </p>
+        </div>
+      </td></tr>
+
+      <!-- Footer -->
+      <tr><td style=""background:#f8f8f8;padding:20px 40px;text-align:center;border-top:1px solid #eee"">
+        <p style=""margin:0 0 4px;color:#aaa;font-size:12px"">
+          Si no solicitaste recuperar tu contraseña, podés ignorar este email con seguridad.
+        </p>
+        <p style=""margin:0;color:#aaa;font-size:12px"">
+          📍 Av. Espora 1180, Adrogué &nbsp;|&nbsp; 📞 +54 9 11 3115-0908
+        </p>
+      </td></tr>
+
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>";
 
         // ─── Helper: filas de items para emails ───────────────────────────────────
 
