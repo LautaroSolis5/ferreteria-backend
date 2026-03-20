@@ -28,14 +28,14 @@ namespace BLL.Servicios
         public async Task<Oferta> CrearAsync(Oferta oferta)
         {
             var val = oferta.Validar();
-            if (!val.Exitoso) throw new Exception(val.Mensaje);
+            if (!val.Exito) throw new Exception(val.Mensaje);
             return await _repo.CrearAsync(oferta);
         }
 
         public async Task<Oferta> ActualizarAsync(Oferta oferta)
         {
             var val = oferta.Validar();
-            if (!val.Exitoso) throw new Exception(val.Mensaje);
+            if (!val.Exito) throw new Exception(val.Mensaje);
             return await _repo.ActualizarAsync(oferta);
         }
     }
