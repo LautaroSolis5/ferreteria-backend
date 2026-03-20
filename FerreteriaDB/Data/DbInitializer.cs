@@ -117,11 +117,34 @@ namespace FerreteriaDB.Data
                     FechaCreacion TIMESTAMP NOT NULL DEFAULT NOW()
                 );
 
+                -- Tabla de ofertas del mes
+                CREATE TABLE IF NOT EXISTS Ofertas (
+                    IdOferta       SERIAL         PRIMARY KEY,
+                    Titulo         TEXT           NOT NULL,
+                    Descripcion    TEXT,
+                    PrecioOferta   DECIMAL(18,2)  NOT NULL,
+                    PrecioAnterior DECIMAL(18,2),
+                    ImagenUrl      TEXT,
+                    EsCombo        BOOLEAN        NOT NULL DEFAULT FALSE,
+                    Activa         BOOLEAN        NOT NULL DEFAULT FALSE,
+                    FechaInicio    TIMESTAMP,
+                    FechaFin       TIMESTAMP,
+                    FechaCreacion  TIMESTAMP      NOT NULL DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS OfertaProductos (
+                    IdOfertaProducto SERIAL  PRIMARY KEY,
+                    IdOferta         INTEGER NOT NULL REFERENCES Ofertas(IdOferta)  ON DELETE CASCADE,
+                    IdProducto       INTEGER NOT NULL REFERENCES Productos(Id)      ON DELETE CASCADE,
+                    UNIQUE (IdOferta, IdProducto)
+                );
+
                 -- Índices de rendimiento
                 CREATE INDEX IF NOT EXISTS idx_pedidos_usuarioid    ON Pedidos(UsuarioId);
                 CREATE INDEX IF NOT EXISTS idx_pedidoitems_pedidoid ON PedidoItems(PedidoId);
                 CREATE INDEX IF NOT EXISTS idx_pagos_pedidoid       ON Pagos(PedidoId);
-                CREATE INDEX IF NOT EXISTS idx_notif_leida          ON Notificaciones(Leida);";
+                CREATE INDEX IF NOT EXISTS idx_notif_leida          ON Notificaciones(Leida);
+                CREATE INDEX IF NOT EXISTS idx_ofertas_activa       ON Ofertas(Activa);";
             cmd.ExecuteNonQuery();
         }
 

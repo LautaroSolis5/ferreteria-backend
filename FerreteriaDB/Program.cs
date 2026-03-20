@@ -41,8 +41,10 @@ builder.Services.AddScoped<IAuthServicio,          AuthServicio>();
 builder.Services.AddScoped<PedidoRepositorio>();
 builder.Services.AddScoped<PagoRepositorio>();
 builder.Services.AddScoped<NotificacionRepositorio>();
+builder.Services.AddScoped<OfertaRepositorio>();
 builder.Services.AddScoped<IPedidoServicio,        PedidoServicio>();
 builder.Services.AddScoped<INotificacionServicio,  NotificacionServicio>();
+builder.Services.AddScoped<IOfertaServicio,        OfertaServicio>();
 
 // ─── JWT Helper ──────────────────────────────────────────────────────────────
 
