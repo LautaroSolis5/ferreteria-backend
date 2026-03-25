@@ -4,6 +4,8 @@ using MercadoPago.Client.Preference;
 using MercadoPago.Config;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace FerreteriaDB.Controllers
@@ -37,6 +39,8 @@ namespace FerreteriaDB.Controllers
                 UnitPrice  = i.PrecioUnitario,
             }).ToList();
 
+            var backendUrl = _config["BackendBaseUrl"] ?? "https://ferreteria-backend.onrender.com";
+
             var preferenceRequest = new PreferenceRequest
             {
                 Items             = items,
@@ -47,7 +51,8 @@ namespace FerreteriaDB.Controllers
                     Failure = $"{frontendUrl}/pago/fallido",
                     Pending = $"{frontendUrl}/pago/pendiente",
                 },
-                AutoReturn = "approved",
+                AutoReturn      = "approved",
+                NotificationUrl = $"{backendUrl}/api/pagos/webhook",
             };
 
             var client     = new PreferenceClient();
@@ -69,6 +74,43 @@ namespace FerreteriaDB.Controllers
             {
                 MercadoPagoConfig.AccessToken = _config["MercadoPago:AccessToken"];
 
+                // ── Validar firma x-signature ─────────────────────────────────
+                var secret = _config["MercadoPago:WebhookSecret"];
+                if (!string.IsNullOrEmpty(secret))
+                {
+                    var xSignature = Request.Headers["x-signature"].FirstOrDefault() ?? "";
+                    var xRequestId = Request.Headers["x-request-id"].FirstOrDefault() ?? "";
+                    var dataIdQp   = Request.Query["data.id"].FirstOrDefault() ?? "";
+
+                    string? ts = null, v1 = null;
+                    foreach (var part in xSignature.Split(','))
+                    {
+                        var kv = part.Split('=', 2);
+                        if (kv.Length == 2)
+                        {
+                            var k = kv[0].Trim();
+                            if (k == "ts") ts = kv[1].Trim();
+                            else if (k == "v1") v1 = kv[1].Trim();
+                        }
+                    }
+
+                    if (ts != null && v1 != null)
+                    {
+                        // Construir manifest según doc de MP
+                        var parts = new List<string>();
+                        if (!string.IsNullOrEmpty(dataIdQp))   parts.Add($"id:{dataIdQp}");
+                        if (!string.IsNullOrEmpty(xRequestId)) parts.Add($"request-id:{xRequestId}");
+                        parts.Add($"ts:{ts}");
+                        var manifest = string.Join(";", parts) + ";";
+
+                        using var hmac  = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
+                        var computed    = Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(manifest))).ToLower();
+
+                        if (computed != v1) return Ok(); // firma inválida, ignorar
+                    }
+                }
+
+                // ── Procesar notificación ─────────────────────────────────────
                 if (!body.TryGetProperty("type", out var typeEl) || typeEl.GetString() != "payment")
                     return Ok();
 
@@ -76,7 +118,6 @@ namespace FerreteriaDB.Controllers
                     !dataEl.TryGetProperty("id", out var idEl))
                     return Ok();
 
-                // El id puede venir como string o número
                 var paymentIdStr = idEl.ValueKind == JsonValueKind.String
                     ? idEl.GetString()
                     : idEl.GetInt64().ToString();
@@ -103,8 +144,7 @@ namespace FerreteriaDB.Controllers
             }
             catch
             {
-                // Siempre devolver 200 para que MP no reintente indefinidamente
-                return Ok();
+                return Ok(); // Siempre 200 para que MP no reintente
             }
         }
     }
